@@ -58,7 +58,7 @@ public class WechatPay implements PaymentStrategy {
     @Autowired
     private Verifier verifier;
 
-    private static String DESCRIPTION = "瑞云远程桌面连接数购买";
+    private static String DESCRIPTION = "商品购买";
     private static final long RESPONSE_EXPIRED_MINUTES = 5;
 
     @Override
