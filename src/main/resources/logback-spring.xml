@@ -1,0 +1,64 @@
+<configuration>
+    <property name="moduleName" value="pay-server"/>
+    <springProperty scope="context" name="logging.path"  source="logging.path"/>
+    <springProperty scope="context" name="logging.level" source="logging.level"/>
+    <property name="charset" value="utf-8"/>
+
+    <!--格式化输出：%d:表示日期    %thread:表示线程名     %-5level:级别从左显示5个字符宽度  %msg:日志消息    %n:是换行符-->
+    <!-- 彩色日志格式 -->
+    <property name="pattern" value="%d{HH:mm:ss.SSS} %red([%contextName]) %yellow([%thread]) %highlight(%-5level) %boldMagenta(%logger{36}) %green(%line) - %cyan(%msg%n)" />
+
+    <contextName>${moduleName}</contextName>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${pattern}</pattern>
+            <charset>${charset}</charset>
+        </encoder>
+    </appender>
+
+    <!-- 按照每天生成日誌文件, 最多保留30天 -->
+    <appender name="RollingFile" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${logging.path}/${moduleName}/${moduleName}-info.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${logging.path}/${moduleName}/${moduleName}.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+            <maxFileSize>3GB</maxFileSize>
+            <totalSizeCap>50GB</totalSizeCap>
+        </rollingPolicy>
+
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${pattern}</pattern>
+            <charset>${charset}</charset>
+        </encoder>
+
+    </appender>
+
+    <appender name="ErrorRollingFile" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${logging.path}/${moduleName}/${moduleName}-error.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${logging.path}/${moduleName}/${moduleName}.%d{yyyy-MM-dd}.%i.error</fileNamePattern>
+            <maxHistory>30</maxHistory>
+            <maxFileSize>3GB</maxFileSize>
+            <totalSizeCap>50GB</totalSizeCap>
+        </rollingPolicy>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${pattern}</pattern>
+            <charset>${charset}</charset>
+        </encoder>
+    </appender>
+
+    <logger name="com.lrj.pay" level="INFO">
+        <appender-ref ref="RollingFile"/>
+        <appender-ref ref="ErrorRollingFile"/>
+    </logger>
+
+    <root level="INFO">
+        <appender-ref ref="STDOUT"/>
+        <appender-ref ref="RollingFile"/>
+        <appender-ref ref="ErrorRollingFile"/>
+    </root>
+
+</configuration>
