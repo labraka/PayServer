@@ -2,7 +2,7 @@
 wechat-pay:
  app-id: wxcf51560d3b123456  # APPID 公众账号ID（qjcloud的）
  mch-id: 1516123456  # 商户号
-# open-id: 1558950191  # 用户的开放平台授权id
+ secret: 1558950191  # 商户授权的appSecret
  mch-serial-no: 4A20F54F95DB847E8684D837F535392270123456  # 商户API证书序列号
  private-key-path: F:\Payment\src\main\resources\static\apiclient_key.pem  # 商户私钥文件，放在工程目录下
 # platform-cert-path: /static/platform-cert.cert  # 微信支付平台证书，放在工程目录下

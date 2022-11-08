@@ -32,6 +32,14 @@ public class PayReqDto {
      */
     private Integer payType;
     /**
+     * 购买类型（1购买；2续费）
+     */
+    private Integer payMode;
+    /**
+     * 微信授权码，微信jsapi支付调用，前端必须传入code
+     */
+    private String code;
+    /**
      *  0：简约前置模式；1：前置模式；2：跳转模式；3：迷你前置模式；4：可定义宽度的嵌入式二维码
      *  详见说明：https://pingplusplus.kf5.com/hc/kb/article/1137360/
      */

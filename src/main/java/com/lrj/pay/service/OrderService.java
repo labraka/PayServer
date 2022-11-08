@@ -38,4 +38,6 @@ public interface OrderService extends IService<Order> {
     void close(Order order);
 
     ApiResponse getUserOrders(Pages page, Long userId);
+
+    ApiResponse unitePay(PayReqDto payReqDto, Long userId, HttpServletRequest request);
 }

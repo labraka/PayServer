@@ -26,4 +26,21 @@ public enum ConsumeTypeEnum {
     public String getDes() {
         return des;
     }
+
+    /**
+     * 根据消费类型获取消费类型枚举
+     * @author: luorenjie
+     * @date: 2022/9/15 16:39
+     * @param type
+     * @return: com.ray.link.enums.PayTypeEnum
+     */
+    public static ConsumeTypeEnum getConsumeType(Integer type){
+        ConsumeTypeEnum[] consumeTypeEnums = ConsumeTypeEnum.values();
+        for (ConsumeTypeEnum payTypeEnum : consumeTypeEnums) {
+            if (payTypeEnum.getType().equals(type)){
+                return payTypeEnum;
+            }
+        }
+        return null;
+    }
 }

@@ -26,8 +26,8 @@ public class WechatPayParams {
     private String appId;
     @Value("${wechat-pay.mch-id}")
     private String mchId;
-//    @Value("${wechat-pay.open-id}")
-//    private String openId;
+    @Value("${wechat-pay.secret}")
+    private String secret;
     @Value("${wechat-pay.v3-key}")
     private String v3Key;
     @Value("${wechat-pay.notify-url}")

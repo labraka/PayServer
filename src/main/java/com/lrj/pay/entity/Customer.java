@@ -34,6 +34,12 @@ public class Customer implements Serializable{
     private Integer level ;
 
     /**
+     * 主控并发数
+     */
+    @TableField("master_control_num")
+    private Integer masterControlNum ;
+
+    /**
      * 注册时间
      */
     @TableField("create_time")

@@ -170,4 +170,19 @@ public class OrderController {
 //        orderService.checkPayStatus();
         orderService.checkRefundStatus();
     }
+
+    /**
+     * 聚合支付
+     * @author: luorenjie
+     * @date: 2022/9/15 16:43
+     * @param payReqDto
+     * @param request
+     * @return: com.ray.link.api.ApiResponse
+     */
+    @PostMapping("/unitePay")
+    public ApiResponse unitePay(@RequestBody PayReqDto payReqDto, HttpServletRequest request){
+        String userId = request.getHeader("userId");
+//        String userId = "1";
+        return orderService.unitePay(payReqDto, Long.valueOf(userId), request);
+    }
 }

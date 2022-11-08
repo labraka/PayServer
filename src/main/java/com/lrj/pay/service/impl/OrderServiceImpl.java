@@ -4,11 +4,13 @@ import com.alibaba.fastjson2.JSONObject;
 import com.alipay.api.response.AlipayTradeCloseResponse;
 import com.alipay.api.response.AlipayTradePagePayResponse;
 import com.alipay.api.response.AlipayTradeRefundResponse;
+import com.alipay.api.response.AlipayTradeWapPayResponse;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.lrj.pay.dto.PayReqDto;
+import com.lrj.pay.dto.QueryReqDto;
 import com.lrj.pay.entity.Customer;
 import com.lrj.pay.entity.Order;
 import com.lrj.pay.entity.Product;
@@ -30,6 +32,7 @@ import com.lrj.pay.utils.Pages;
 import com.lrj.pay.utils.SnowFlakeUtil;
 import com.lrj.pay.vo.OrderRespVo;
 import com.lrj.pay.vo.PayRespVo;
+import com.lrj.pay.vo.PriceRespVo;
 import io.micrometer.core.instrument.util.NamedThreadFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -143,7 +146,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
         //生成订单
         Order order = createOrder(payReqDto,
-                userId,
+                customer,
                 ConsumeTypeEnum.BUY.getType(),
                 timeNums,
                 product);
@@ -194,7 +197,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         //创建订单
         Order order = createOrder(payReqDto,
-                userId,
+                customer,
                 ConsumeTypeEnum.FEE.getType(),
                 payReqDto.getTimeNum(),
                 product);
@@ -542,6 +545,192 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         return ApiResponse.returnSuccess(baseRespBody);
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    @Override
+    public ApiResponse unitePay(PayReqDto payReqDto, Long userId, HttpServletRequest request) {
+        if (ObjectUtils.isEmpty(payReqDto.getPayMode())
+                || ConsumeTypeEnum.getConsumeType(payReqDto.getPayMode()) == null){
+            log.error(ApiResponseEnum.PARAMETER_INVALID.getLabel());
+            return ApiResponse.returnFail(ApiResponseEnum.PARAMETER_INVALID);
+        }
+
+        //用户相关业务校验
+        Customer customer = userFeignClient.getCustomerById(userId);
+        if (ObjectUtils.isEmpty(customer)) {
+            log.error(ApiResponseEnum.USER_NOT_FOUND.getLabel());
+            return ApiResponse.returnFail(ApiResponseEnum.USER_NOT_FOUND);
+        }
+
+        //校验并查询价格
+        BeanCopier beanCopier = BeanCopier.create(PayReqDto.class, QueryReqDto.class, false);
+        QueryReqDto queryReqDto = new QueryReqDto();
+        queryReqDto.setConsumeType(payReqDto.getPayMode());
+        beanCopier.copy(payReqDto, queryReqDto, null);
+        ApiResponse apiResponse = productService.price(queryReqDto, customer);
+        if (apiResponse.getCode() != 200){
+            return apiResponse;
+        }
+        Map<String, Object> map = (Map<String, Object>) apiResponse.getData();
+        String jsonStr = JSONObject.toJSONString(map.get("priceRespVo"));
+        PriceRespVo priceRespVo = JSONObject.parseObject(jsonStr, PriceRespVo.class);
+        String jsonStr1 = JSONObject.toJSONString(map.get("product"));
+        Product product = JSONObject.parseObject(jsonStr1, Product.class);
+        String jsonStr2 = JSONObject.toJSONString(map.get("customer"));
+        double timeNums = (double) map.get("timeNums");
+
+       /*
+        //用户相关业务校验
+        Customer customer = userFeignClient.getCustomerById(userId);
+        if (ObjectUtils.isEmpty(customer)) {
+            log.error(ApiResponseEnum.USER_NOT_FOUND.getLabel());
+            return ApiResponse.returnFail(ApiResponseEnum.USER_NOT_FOUND);
+        }
+        if (payReqDto.getPayMode() == ConsumeTypeEnum.FEE.getType()){
+            if (customer.getAccountLevel() == 1
+                    || (ObjectUtils.isEmpty(customer.getVipEndTime())
+                    && customer.getVipEndTime().compareTo(LocalDateTime.now()) == -1)) {
+                log.error("当前用户是免费用户，不支持续费， 用户id：{}", userId);
+                return ApiResponse.returnFail(ApiResponseEnum.USER_LOW_LEVEL);
+            }
+        }
+
+        RayLinkProduct rayLinkProduct = productService.getProduct(payReqDto.getProductId());
+        if (ObjectUtils.isEmpty(rayLinkProduct)) {
+            log.error("用户购买产品不存在：{}", payReqDto.getProductId());
+            return ApiResponse.returnFail(ApiResponseEnum.PRODUCT_NONE);
+        }
+        double timeNums;
+        if (payReqDto.getPayMode() == ConsumeTypeEnum.BUY.getType()){
+            *//*
+         * 计算剩余有效天数,会员有效期购买和过有效期（or首次）购买计算规则不一样
+         *//*
+            BigDecimal totalAmount = BigDecimal.ZERO;
+            if (customer.getAccountLevel() == 1
+                    || (ObjectUtils.isEmpty(customer.getVipEndTime())
+                    && customer.getVipEndTime().compareTo(LocalDateTime.now()) == -1)) {
+
+                timeNums = payReqDto.getTimeNum();
+            } else {
+                LocalDateTime now = LocalDateTime.now();
+                long days = DateUtil.differTimeNums(now, customer.getVipEndTime(), 4);
+                if (days < 0) {
+                    log.error("时间参数错误：{}", days);
+                    return ApiResponse.returnFail(ApiResponseEnum.PARAMETER_INVALID);
+                }
+                if (days == 0) {
+                    days = days + 1;
+                }
+                timeNums = Math.round(days * 100 / MONTH_DAYS) / 100.0;
+            }
+
+            totalAmount = rayLinkProduct.getPrice()
+                    .multiply(BigDecimal.valueOf(payReqDto.getNum()))
+                    .multiply(BigDecimal.valueOf(timeNums));
+
+            //校验金额
+            if (payReqDto.getAmount().compareTo(BigDecimal.ZERO) != 1
+                    || totalAmount.compareTo(payReqDto.getAmount()) != 0) {
+                log.error("用户购买金额错误：{}", payReqDto.getAmount());
+                return ApiResponse.returnFail(ApiResponseEnum.MONEY_ERROR);
+            }
+        }else {
+            //计算价格
+            BigDecimal totalAmount = rayLinkProduct.getPrice()
+                    .multiply(BigDecimal.valueOf(payReqDto.getNum()))
+                    .multiply(new BigDecimal(payReqDto.getTimeNum()));
+
+            //校验金额
+            if (payReqDto.getAmount().compareTo(BigDecimal.ZERO) != 1
+                    || totalAmount.compareTo(payReqDto.getAmount()) != 0) {
+                log.error("用户续费金额错误：{}", payReqDto.getAmount());
+                return ApiResponse.returnFail(ApiResponseEnum.MONEY_ERROR);
+            }
+            timeNums = payReqDto.getTimeNum();
+        }
+
+*/
+        //校验金额
+        if (payReqDto.getAmount().compareTo(BigDecimal.ZERO) != 1
+                || priceRespVo.getTotal().compareTo(payReqDto.getAmount()) != 0) {
+            log.error("用户" + ConsumeTypeEnum.getConsumeType(payReqDto.getPayMode()).getDes()
+                    + "金额错误：{}，计算金额为：{}", payReqDto.getAmount(), priceRespVo.getTotal());
+            return ApiResponse.returnFail(ApiResponseEnum.MONEY_ERROR);
+        }
+
+        PayTypeEnum payTypeEnum = PayTypeEnum.getPayType(payReqDto.getPayType());
+        if (ObjectUtils.isEmpty(payTypeEnum)) {
+            log.error("支付方式错误：{}", payReqDto.getPayType());
+            return ApiResponse.returnFail(ApiResponseEnum.PAY_TYPE_ERROR);
+        }
+        //生成订单
+        Order order = createOrder(payReqDto,
+                customer,
+                payReqDto.getPayMode(),
+                timeNums,
+                product);
+
+        //去调用支付
+        PayRespVo payRespVo = toUnitPay(payReqDto, order, payTypeEnum, request);
+        return ApiResponse.returnSuccess(payRespVo);
+    }
+
+    /**
+     * 统一下单，调用支付宝/微信
+     *
+     * @param payReqDto
+     * @param order
+     * @param payTypeEnum
+     * @param request
+     * @author: luorenjie
+     * @date: 2022/9/14 18:49
+     * @return: com.ray.link.vo.PayRespVo
+     */
+    private PayRespVo toUnitPay(PayReqDto payReqDto, Order order, PayTypeEnum payTypeEnum, HttpServletRequest request) {
+        PayRespVo payRespVo = new PayRespVo();
+        String form = "";
+        try {
+            switch (payTypeEnum){
+                case ALI:
+                    PaymentContext paymentContext = new PaymentContext(payReqDto, order.getOrderNo(), aliPay);
+                    AlipayTradeWapPayResponse response = (AlipayTradeWapPayResponse) paymentContext.payUnite();
+                    String msg = "支付宝支付调用失败，返回码 ===> " + response.getCode() + ", 返回描述 ===> " + response.getMsg();
+                    if (response.isSuccess()) {
+                        msg = "支付宝支付调用成功，返回结果 ===> " + response.getBody();
+                        form = response.getBody();
+                    }
+                    log.info(msg);
+                    break;
+                case WECHAT:
+                    paymentContext = new PaymentContext(request, payReqDto, order.getOrderNo(), wechatPay);
+                    CloseableHttpResponse response1 = (CloseableHttpResponse)paymentContext.payUnite();
+                    int statusCode = response1.getStatusLine().getStatusCode();
+                    JSONObject jsonObject = JSONObject.parseObject(EntityUtils.toString(response1.getEntity()));
+                    msg = "微信支付调用失败，返回码 ===> " + statusCode + ", 返回体 ===> " + jsonObject;
+                    String prepayId = "";
+                    if (statusCode == 200 || statusCode == 204) {
+                        msg = "微信支付调用成功，返回结果 ===> " + jsonObject;
+                        prepayId = jsonObject.getString("prepay_id");
+                    }
+                    log.info(msg);
+                    Map<String, String> map = wechatPay.buildPayMap(prepayId);
+                    form = com.alibaba.fastjson2.JSON.toJSONString(map);
+                    log.info("唤起支付参数:{}", map);
+                    break;
+            }
+        }catch (Exception e){
+            log.error("支付产生异常：{}", e);
+            throw new PayException(ApiResponseEnum.PAY_FAIL, e);
+        }
+        payRespVo.setRechargeId(order.getId());
+        payRespVo.setJumpUrl(form);
+
+        Order order1 = new Order();
+        order1.setJumpUrl(form);
+        orderMapper.update(order1,
+                new LambdaQueryWrapper<Order>().eq(Order::getId, order.getId()));
+        return payRespVo;
+    }
+
     /**
      * 支付-检查并更新
      *
@@ -741,25 +930,49 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
      * @date: 2022/8/31 14:29
      * @return: com.lrj.pay.entity.Order
      */
-    private Order createOrder(PayReqDto payReqDto, Long userId, Integer consumeType, double timeNums, Product product) {
+    private Order createOrder(PayReqDto payReqDto, Customer customer, Integer consumeType, double timeNums, Product product) {
         Order order = new Order();
-        order.setUserId(userId);
+        order.setUserId(customer.getId());
         order.setAmount(payReqDto.getAmount());
         order.setConcurrentNum(payReqDto.getNum());
         order.setConsumeType(consumeType);
         order.setConsumeNum(timeNums);
-        SnowFlakeUtil idWorker = new SnowFlakeUtil(1, 1);
-        long id = idWorker.nextId();
-        String perDate = DateUtil.dateToStr(LocalDateTime.now(), "yyMMdd");
-        String orderNo = perDate + id;
-        order.setOrderNo(PRFIX + orderNo);
+        order.setOrderNo(createOrderNo());
         order.setProductId(product.getId());
         order.setProductName(product.getName());
         order.setPrice(product.getPrice());
         order.setTimeType(product.getUnit());
         order.setPayType(payReqDto.getPayType());
+        //新增记录用户的到期时间
+        if (payReqDto.getPayMode().equals(ConsumeTypeEnum.BUY.getType())){
+            if (customer.getLevel() == 2 || customer.getVipEndTime().isAfter(LocalDateTime.now())){
+                order.setEndTime(customer.getVipEndTime());
+                LocalDateTime now = LocalDateTime.now();
+                long months = DateUtil.differTimeNums(now, customer.getVipEndTime(),  DateTimeTypeEnum.MONTH.getType());
+                if (months <= 0) {
+                    long days = DateUtil.differTimeNums(now, customer.getVipEndTime(), DateTimeTypeEnum.DAY.getType());
+                    days += 1;
+                    order.setConsumeNum((double) days);
+                    order.setTimeType(DateTimeTypeEnum.DAY.getType());
+                }
+            }
+        }
         orderMapper.insert(order);
         return order;
+    }
+
+    /**
+     * 创建订单号
+     * @author: luorenjie
+     * @date: 2022/9/27 17:22
+     * @return: java.lang.String
+     */
+    private String createOrderNo(){
+        SnowFlakeUtil idWorker = new SnowFlakeUtil(1, 1);
+        long id = idWorker.nextId();
+        String perDate = DateUtil.dateToStr(LocalDateTime.now(), "yyMMdd");
+        String orderNo = perDate + id;
+        return PRFIX + orderNo;
     }
 
     /**

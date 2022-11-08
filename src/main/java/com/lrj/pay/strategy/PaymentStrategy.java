@@ -20,7 +20,7 @@ public interface PaymentStrategy {
      * @param paymentContext
      * @return: java.lang.Object
      */
-    Object pay(PaymentContext paymentContext) throws AlipayApiException, IOException;
+    Object payForPc(PaymentContext paymentContext) throws AlipayApiException, IOException;
 
     /**
      * 验签
@@ -66,4 +66,13 @@ public interface PaymentStrategy {
      * @return: java.lang.Object
      */
     Object close(PaymentContext paymentContext) throws AlipayApiException, IOException;
+
+    /**
+     * 手机跳转支付
+     * @author: luorenjie
+     * @date: 2022/9/15 14:18
+     * @param paymentContext
+     * @return: java.lang.Object
+     */
+    Object payForMp(PaymentContext paymentContext) throws Exception;
 }

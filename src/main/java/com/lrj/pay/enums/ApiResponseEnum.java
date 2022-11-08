@@ -27,7 +27,7 @@ public enum ApiResponseEnum {
     PAY_TYPE_ERROR(1003, "pay_type_error", "支付方式错误", false),
     REFUND_FAIL(1004, "refund_fail", "退款失败", false),
     CLOSE_FAIL(1005, "close_fail", "关闭订单失败", false),
-
+    WECHAT_PARAMS_REQ_FAIL(1006, "wechat_params_req_fail", "微信参数调用请求出错", false),
     ;
 
     protected int id;

@@ -1,16 +1,22 @@
 package com.lrj.pay.strategy.impl;
 
+import cn.hutool.core.codec.Base64;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.lrj.pay.client.WechatPayInitClient;
+import com.lrj.pay.config.WechatAccessToken;
 import com.lrj.pay.config.WechatPayParams;
 import com.lrj.pay.config.WechatUrlConfig;
+import com.lrj.pay.enums.ApiResponseEnum;
 import com.lrj.pay.enums.DateTimeTypeEnum;
+import com.lrj.pay.exception.PayException;
 import com.lrj.pay.strategy.PaymentContext;
 import com.lrj.pay.strategy.PaymentStrategy;
 import com.lrj.pay.utils.DateUtil;
+import com.lrj.pay.utils.IPUtil;
 import com.wechat.pay.contrib.apache.httpclient.auth.Verifier;
 import com.wechat.pay.contrib.apache.httpclient.util.AesUtil;
+import com.wechat.pay.contrib.apache.httpclient.util.PemUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
@@ -21,19 +27,23 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.util.ObjectUtils;
+import org.springframework.web.client.RestTemplate;
 
 import javax.servlet.http.HttpServletRequest;
 import java.io.BufferedReader;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.security.PrivateKey;
+import java.security.Signature;
 import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 import static com.wechat.pay.contrib.apache.httpclient.constant.WechatPayHttpHeaders.*;
 import static org.apache.http.HttpHeaders.ACCEPT;
@@ -58,11 +68,13 @@ public class WechatPay implements PaymentStrategy {
     @Autowired
     private Verifier verifier;
 
+    private RestTemplate template = new RestTemplate();
+
     private static String DESCRIPTION = "商品购买";
     private static final long RESPONSE_EXPIRED_MINUTES = 5;
 
     @Override
-    public Object pay(PaymentContext paymentContext) throws IOException {
+    public Object payForPc(PaymentContext paymentContext) throws IOException {
         //1.根据微信的配置生成一个支付客户端
 //        CloseableHttpClient httpClient = wechatPayInitClient.initHttpClient();
 
@@ -73,7 +85,7 @@ public class WechatPay implements PaymentStrategy {
 
 
         //3.组装当前业务方法的请求参数
-        String paramsStr = createPayRequestParams(paymentContext);
+        String paramsStr = createPcPayRequestParams(paymentContext);
         StringEntity entityStr = new StringEntity(paramsStr, "UTF-8");
         entityStr.setContentType(APPLICATION_JSON.toString());
         httpPost.setEntity(entityStr);
@@ -182,15 +194,39 @@ public class WechatPay implements PaymentStrategy {
         return response;
     }
 
+    @Override
+    public Object payForMp(PaymentContext paymentContext) throws Exception {
+        //1.根据微信的配置生成一个支付客户端
+//        CloseableHttpClient httpClient = wechatPayInitClient.initHttpClient();
+
+        //2.创建一个支付请求 //设置请求参数
+        HttpPost httpPost = new HttpPost(WechatUrlConfig.JSAPI_ORDER_URL);
+        httpPost.addHeader(ACCEPT, APPLICATION_JSON.toString());
+        httpPost.addHeader(CONTENT_TYPE, APPLICATION_JSON.toString());
+
+
+        //3.组装当前业务方法的请求参数
+        String paramsStr = createJsapiPayRequestParams(paymentContext);
+        StringEntity entityStr = new StringEntity(paramsStr, "UTF-8");
+        entityStr.setContentType(APPLICATION_JSON.toString());
+        httpPost.setEntity(entityStr);
+
+        //4.执行请求，调用微信接口
+        CloseableHttpResponse response = wechatPayClient.execute(httpPost);
+        String bodyAsString = EntityUtils.toString(response.getEntity());
+        log.info("微信支付返回参数：{}", bodyAsString);
+        return response;
+    }
+
     /**
-     * 组装微信支付请求参数
+     * 组装微信电脑支付请求参数
      *
      * @param paymentContext
      * @author: luorenjie
      * @date: 2022/8/17 10:44
      * @return: com.fasterxml.jackson.databind.node.ObjectNode
      */
-    private String createPayRequestParams(PaymentContext paymentContext) {
+    private String createPcPayRequestParams(PaymentContext paymentContext) {
         WechatPayParams wechatPayParams = wechatPayInitClient.getWechatPayParams();
         LocalDateTime endTime = DateUtil.addTime(LocalDateTime.now(), DateTimeTypeEnum.MILLIS.getType(), Long.valueOf(wechatPayParams.getBookingTime()));
         String timeOut = DateUtil.transRFC3339(endTime);
@@ -207,6 +243,76 @@ public class WechatPay implements PaymentStrategy {
         amountMap.put("total", paymentContext.getPayReqDto().getAmount().multiply(new BigDecimal(100)).intValue());
         amountMap.put("currency", "CNY");
         paramsMap.put("amount", amountMap);
+
+        String json = JSON.toJSONString(paramsMap);
+        return json;
+    }
+
+    /**
+     * 组装微信h5支付请求参数
+     * @author: luorenjie
+     * @date: 2022/9/15 15:59
+     * @param paymentContext
+     * @return: java.lang.String
+     */
+    private String createH5PayRequestParams(PaymentContext paymentContext) {
+        WechatPayParams wechatPayParams = wechatPayInitClient.getWechatPayParams();
+        LocalDateTime endTime = DateUtil.addTime(LocalDateTime.now(), DateTimeTypeEnum.MILLIS.getType(), Long.valueOf(wechatPayParams.getBookingTime()));
+        String timeOut = DateUtil.transRFC3339(endTime);
+
+        Map paramsMap = new HashMap();
+        paramsMap.put("appid", wechatPayParams.getAppId());
+        paramsMap.put("mchid", wechatPayParams.getMchId());
+        paramsMap.put("description", DESCRIPTION);
+        paramsMap.put("notify_url", wechatPayParams.getNotifyUrl());
+        paramsMap.put("out_trade_no", paymentContext.getOrderNo());
+        paramsMap.put("time_expire", timeOut);
+
+        Map amountMap = new HashMap();
+        amountMap.put("total", paymentContext.getPayReqDto().getAmount().multiply(new BigDecimal(100)).intValue());
+        amountMap.put("currency", "CNY");
+        paramsMap.put("amount", amountMap);
+
+        Map ipMap = new HashMap();
+        ipMap.put("payer_client_ip", IPUtil.getIpAddress(paymentContext.getRequest()));
+
+        Map h5InfoMap = new HashMap();
+        h5InfoMap.put("type", "Wap");
+        ipMap.put("h5_info", h5InfoMap);
+        paramsMap.put("scene_info", ipMap);
+
+        String json = JSON.toJSONString(paramsMap);
+        return json;
+    }
+
+    /**
+     * 组装微信JSAPI支付请求参数
+     * @author: luorenjie
+     * @date: 2022/11/8 12:31
+     * @param paymentContext
+     * @return: java.lang.String
+     */
+    private String createJsapiPayRequestParams(PaymentContext paymentContext) throws Exception {
+        WechatPayParams wechatPayParams = wechatPayInitClient.getWechatPayParams();
+        LocalDateTime endTime = DateUtil.addTime(LocalDateTime.now(), DateTimeTypeEnum.MILLIS.getType(), Long.valueOf(wechatPayParams.getBookingTime()));
+        String timeOut = DateUtil.transRFC3339(endTime);
+
+        Map paramsMap = new HashMap();
+        paramsMap.put("appid", wechatPayParams.getAppId());
+        paramsMap.put("mchid", wechatPayParams.getMchId());
+        paramsMap.put("description", DESCRIPTION);
+        paramsMap.put("notify_url", wechatPayParams.getNotifyUrl());
+        paramsMap.put("out_trade_no", paymentContext.getOrderNo());
+        paramsMap.put("time_expire", timeOut);
+
+        Map amountMap = new HashMap();
+        amountMap.put("total", paymentContext.getPayReqDto().getAmount().multiply(new BigDecimal(100)).intValue());
+        amountMap.put("currency", "CNY");
+        paramsMap.put("amount", amountMap);
+
+        Map openidMap = new HashMap();
+        openidMap.put("openid", getOpenId(paymentContext.getPayReqDto().getCode()));
+        paramsMap.put("payer", openidMap);
 
         String json = JSON.toJSONString(paramsMap);
         return json;
@@ -353,5 +459,111 @@ public class WechatPay implements PaymentStrategy {
         log.info("明文 ===> {}", plainText);
 
         return plainText;
+    }
+
+
+    /**
+     * 获取openId
+     * @param code
+     * @return
+     * @throws Exception
+     */
+    public String getOpenId(String code) throws Exception {
+        WechatPayParams wechatPayParams = wechatPayInitClient.getWechatPayParams();
+        // 公众号的appsecret
+        String getOpenIdUri = "https://api.weixin.qq.com/sns/oauth2/access_token?appid=" + wechatPayParams.getAppId() + "&secret=" + wechatPayParams.getSecret() + "&code=" + code + "&grant_type=authorization_code";
+        String json_token = template.getForObject(getOpenIdUri, String.class);
+        WechatAccessToken accessToken = JSONObject.parseObject(json_token, WechatAccessToken.class);
+        if (ObjectUtils.isEmpty(accessToken.getOpenid())) {
+            log.error("微信获取openid失败---" + JSON.toJSONString(accessToken));
+            throw new PayException(ApiResponseEnum.WECHAT_PARAMS_REQ_FAIL);
+        }
+        return accessToken.getOpenid();
+    }
+
+
+    /**
+     * 构建支付参数，以便前端Js可以jsAPi的唤起微信支付
+     * @author: luorenjie
+     * @date: 2022/9/16 10:49
+     * @param prepayId
+     * @return: java.util.Map<java.lang.String, java.lang.String>
+     */
+    public Map<String, String> buildPayMap(String prepayId) throws Exception {
+        WechatPayParams wechatPayParams = wechatPayInitClient.getWechatPayParams();
+        String timeStamp = String.valueOf(System.currentTimeMillis() / 1000L);
+        String nonceStr = String.valueOf(System.currentTimeMillis());
+        String packageStr = "prepay_id=" + prepayId;
+        Map<String, String> packageParams = new HashMap(6);
+        packageParams.put("appId", wechatPayParams.getAppId());
+        packageParams.put("timeStamp", timeStamp);
+        packageParams.put("nonceStr", nonceStr);
+        packageParams.put("package", packageStr);
+        packageParams.put("signType", "RSA");
+        ArrayList<String> list = new ArrayList();
+        list.add(wechatPayParams.getAppId());
+        list.add(timeStamp);
+        list.add(nonceStr);
+        list.add(packageStr);
+        String packageSign = createSign(buildSignMessage(list), wechatPayParams.getPrivateKeyPath());
+        packageParams.put("paySign", packageSign);
+        return packageParams;
+    }
+
+    /**
+     * 构建签名
+     * @author: luorenjie
+     * @date: 2022/9/16 10:49
+     * @param signMessage
+     * @param keyPath
+     * @return: java.lang.String
+     */
+    public static String createSign(String signMessage, String keyPath) throws Exception {
+        if (ObjectUtils.isEmpty(signMessage)) {
+            return null;
+        } else {
+            PrivateKey privateKey = PemUtil.loadPrivateKey(
+                    new FileInputStream(keyPath));
+            return encryptByPrivateKey(signMessage, privateKey);
+        }
+    }
+
+    /**
+     * 构建签名且加密
+     * @author: luorenjie
+     * @date: 2022/9/16 10:50
+     * @param data
+     * @param privateKey
+     * @return: java.lang.String
+     */
+    public static String encryptByPrivateKey(String data, PrivateKey privateKey) throws Exception {
+        Signature signature = Signature.getInstance("SHA256WithRSA");
+        signature.initSign(privateKey);
+        signature.update(data.getBytes(StandardCharsets.UTF_8));
+        byte[] signed = signature.sign();
+        return Base64.encode(signed);
+    }
+
+    /**
+     * 构建参数
+     * @author: luorenjie
+     * @date: 2022/9/16 10:50
+     * @param signMessage
+     * @return: java.lang.String
+     */
+    public static String buildSignMessage(List<String> signMessage) {
+        if (signMessage != null && signMessage.size() > 0) {
+            StringBuilder sbf = new StringBuilder();
+            Iterator var2 = signMessage.iterator();
+
+            while(var2.hasNext()) {
+                String str = (String)var2.next();
+                sbf.append(str).append("\n");
+            }
+            System.out.println("list是：" + sbf.toString());
+            return sbf.toString();
+        } else {
+            return null;
+        }
     }
 }

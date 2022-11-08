@@ -43,7 +43,7 @@ public class AliPay implements PaymentStrategy {
     private static final String BODY = "subject";
 
     @Override
-    public Object pay(PaymentContext paymentContext) throws AlipayApiException {
+    public Object payForPc(PaymentContext paymentContext) throws AlipayApiException {
         //1.根据支付宝的配置生成一个支付客户端
 //        AlipayClient alipayClient = aliPayInitClient.initAlipayClient();
 
@@ -52,7 +52,7 @@ public class AliPay implements PaymentStrategy {
         alipayRequest.setNotifyUrl(aliPayInitClient.getAlipayParams().getNotifyUrl());
 
         //3.组装当前业务方法的请求参数
-        String bizContent = createPayRequestParams(paymentContext);
+        String bizContent = createPcPayRequestParams(paymentContext);
         alipayRequest.setBizContent(bizContent);
 
         //4.执行请求，调用支付宝接口
@@ -166,6 +166,24 @@ public class AliPay implements PaymentStrategy {
         return response;
     }
 
+    @Override
+    public Object payForMp(PaymentContext paymentContext) throws AlipayApiException {
+        //1.根据支付宝的配置生成一个支付客户端
+//        AlipayClient alipayClient = aliPayInitClient.initAlipayClient();
+
+        //2.创建一个支付请求 //设置请求参数
+        AlipayTradeWapPayRequest alipayRequest = new AlipayTradeWapPayRequest();
+        alipayRequest.setNotifyUrl(aliPayInitClient.getAlipayParams().getNotifyUrl());
+
+        //3.组装当前业务方法的请求参数
+        String bizContent = createMpPayRequestParams(paymentContext);
+        alipayRequest.setBizContent(bizContent);
+
+        //4.执行请求，调用支付宝接口
+        AlipayTradeWapPayResponse response = alipayClient.pageExecute(alipayRequest);
+        return response;
+    }
+
     /**
      * 组装支付宝支付请求参数
      * @author: luorenjie
@@ -173,7 +191,7 @@ public class AliPay implements PaymentStrategy {
      * @param paymentContext
      * @return: java.lang.String
      */
-    private String createPayRequestParams(PaymentContext paymentContext){
+    private String createPcPayRequestParams(PaymentContext paymentContext){
         JSONObject bizContent = new JSONObject();
         bizContent.put("out_trade_no", paymentContext.getOrderNo());
         bizContent.put("total_amount", paymentContext.getPayReqDto().getAmount());
@@ -184,6 +202,26 @@ public class AliPay implements PaymentStrategy {
         String timeOut = DateUtil.dateToStr(bookingTime, "yyyy-MM-dd HH:mm:ss");
         bizContent.put("time_expire", timeOut);
         bizContent.put("qr_pay_mode",paymentContext.getPayReqDto().getPayQrMode());
+        return bizContent.toString();
+    }
+
+    /**
+     * 组装支付宝手机网站支付参数
+     * @author: luorenjie
+     * @date: 2022/9/15 14:27
+     * @param paymentContext
+     * @return: java.lang.String
+     */
+    private String createMpPayRequestParams(PaymentContext paymentContext){
+        JSONObject bizContent = new JSONObject();
+        bizContent.put("out_trade_no", paymentContext.getOrderNo());
+        bizContent.put("total_amount", paymentContext.getPayReqDto().getAmount());
+        bizContent.put("subject", SUBJECT);
+        bizContent.put("body", BODY);
+        bizContent.put("product_code", "QUICK_WAP_WAY");
+        LocalDateTime bookingTime = DateUtil.addTime(LocalDateTime.now(), DateTimeTypeEnum.MILLIS.getType(), Long.valueOf(aliPayInitClient.getAlipayParams().getBookingTime()));
+        String timeOut = DateUtil.dateToStr(bookingTime, "yyyy-MM-dd HH:mm:ss");
+        bizContent.put("time_expire", timeOut);
         return bizContent.toString();
     }
 

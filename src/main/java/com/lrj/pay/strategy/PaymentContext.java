@@ -35,6 +35,12 @@ public class PaymentContext {
         this.orderNo = orderNo;
         this.paymentStrategy = paymentStrategy;
     }
+    public PaymentContext(HttpServletRequest request, PayReqDto payReqDto, String orderNo, PaymentStrategy paymentStrategy) {
+        this.request = request;
+        this.payReqDto = payReqDto;
+        this.orderNo = orderNo;
+        this.paymentStrategy = paymentStrategy;
+    }
     public PaymentContext(HttpServletRequest request, String reqBody, PaymentStrategy paymentStrategy) {
         this.request = request;
         this.reqBody = reqBody;
@@ -61,7 +67,11 @@ public class PaymentContext {
     }
 
     public Object payNow() throws AlipayApiException, IOException {
-        return paymentStrategy.pay(this);
+        return paymentStrategy.payForPc(this);
+    }
+
+    public Object payUnite() throws Exception {
+        return paymentStrategy.payForMp(this);
     }
 
     public boolean signVerified() throws Exception {
